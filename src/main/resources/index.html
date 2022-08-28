@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ローカル画面共有</title>
+</head>
+
+<body>
+    <div class="parent">
+        <h1>MediaRecorderで画面録画してWebSocketで他のブラウザに流す</h1>
+        <button id="send_button">画面録画を送信する</button>
+        <video id="video_element" width="320" height="180" muted autoplay />
+    </div>
+</body>
+
+<style>
+    .parent {
+        display: flex;
+        align-items: flex-start;
+        flex-direction: column;
+    }
+</style>
+
+<script>
+    // @ts-check
+
+    // 今回利用するコンテナフォーマット、コーデック
+    // コンテナ WebM / 動画コーデック vp8 を指定、音声も行けるはず
+    // Apple製デバイスだと再生できないかも。 h264とかが安牌？
+    const MIME_TYPE = `video/webm; codecs="vp8"`
+
+    // Blobの生成回数
+    const INTERVAL_MS = 500
+
+    // データを受け取ったら video で再生
+    const videoElement = document.getElementById('video_element')
+
+    // 送られてきた映像データを再生する（デコーダー）
+    const mediaSource = new MediaSource()
+    // videoタグを再生用として指定
+    videoElement.src = URL.createObjectURL(mediaSource)
+    let sourceBuffer = undefined
+    mediaSource.addEventListener('sourceopen', () => {
+        // データを書き込む SourceBuffer
+        // コーデックなどをエンコーダーと合わせる
+        sourceBuffer = mediaSource.addSourceBuffer(MIME_TYPE)
+    });
+
+    // WebSocket 接続
+    const socket = new WebSocket('ws://localhost:8080/capture')
+    socket.onmessage = (ev) => {
+        console.log(ev.data)
+        // デコーダーへデータを流し込み、videoタグで再生する
+        if (sourceBuffer) {
+            ev.data.arrayBuffer()
+                .then(buffer => sourceBuffer.appendBuffer(buffer))
+        }
+    }
+
+    // 画面共有を開始する
+    // 録画内容をWebSocketで流す
+    const record = async () => {
+        const result = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true })
+        // MediaRecorder
+        // vp9 / opus だとAppleデバイスで再生できないかも。再生できるコーデック、コンテナフォーマットにして
+        const recorder = new MediaRecorder(result, { mimeType: MIME_TYPE })
+        recorder.ondataavailable = (ev) => {
+            socket.send(ev.data)
+        }
+        recorder.start(INTERVAL_MS)
+    }
+
+    // 録画ボタンを押したら 画面録画 を開始する
+    const recordButton = document.getElementById('send_button')
+    recordButton.onclick = () => { record() }
+
+
+</script>
+
+</html>
